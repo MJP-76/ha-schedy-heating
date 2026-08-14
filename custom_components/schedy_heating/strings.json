@@ -10,15 +10,31 @@
       },
       "rooms": {
         "title": "Configure Rooms",
-        "description": "Add rooms and assign climate entities to each room. Each room gets its own heating schedule.",
+        "description": "Add rooms and assign climate entities to each room.",
         "data": {
           "room_name": "Room Name",
           "room_climate_entities": "Climate Entities for this Room",
           "rescheduling_delay": "Rescheduling Delay (minutes)",
           "override_entity": "Override Entity (optional)",
-          "presence_entity": "Presence Entity (optional, for independent tracking)",
+          "presence_entity": "Presence Entity (optional)",
           "add_another": "Add Another Room",
-          "finish": "Finish Setup"
+          "finish": "Finish & Configure Schedules"
+        }
+      },
+      "schedule": {
+        "title": "Configure Schedule: {room_name}",
+        "description": "Set the time-based heating schedule for {room_name}. Day/night temperatures are used during Home mode.",
+        "data": {
+          "default_temp": "Default Temperature (°C)",
+          "day_temp": "Day Temperature (°C)",
+          "night_temp": "Night Temperature (°C)",
+          "day_start": "Day Start Time (HH:MM)",
+          "day_end": "Day End Time (HH:MM)",
+          "use_weekend_schedule": "Use Different Weekend Schedule",
+          "weekend_day_temp": "Weekend Day Temperature (°C)",
+          "weekend_night_temp": "Weekend Night Temperature (°C)",
+          "weekend_day_start": "Weekend Day Start Time (HH:MM)",
+          "weekend_day_end": "Weekend Day End Time (HH:MM)"
         }
       }
     },

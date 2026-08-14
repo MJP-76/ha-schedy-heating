@@ -19,11 +19,26 @@ from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import (
     CONF_CLIMATE_ENTITIES,
+    CONF_DAY_END,
+    CONF_DAY_START,
+    CONF_DAY_TEMP,
+    CONF_DEFAULT_TEMP,
+    CONF_NIGHT_TEMP,
     CONF_OVERRIDE_ENTITY,
     CONF_PRESENCE_ENTITY,
     CONF_RESCHEDULING_DELAY,
     CONF_ROOMS,
     CONF_ROOM_NAME,
+    CONF_SCHEDULE,
+    CONF_USE_WEEKEND_SCHEDULE,
+    CONF_WEEKEND_DAY_END,
+    CONF_WEEKEND_DAY_START,
+    CONF_WEEKEND_DAY_TEMP,
+    CONF_WEEKEND_NIGHT_TEMP,
+    DEFAULT_DAY_END,
+    DEFAULT_DAY_START,
+    DEFAULT_DAY_TEMP,
+    DEFAULT_NIGHT_TEMP,
     DEFAULT_RESCHEDULING_DELAY,
     DEFAULT_TARGET_TEMP,
     DOMAIN,
@@ -49,6 +64,7 @@ async def async_setup_entry(
         )
         override_entity = room.get(CONF_OVERRIDE_ENTITY)
         presence_entity = room.get(CONF_PRESENCE_ENTITY)
+        schedule = room.get(CONF_SCHEDULE, {})
 
         entities.append(
             SchedyClimate(
@@ -58,6 +74,7 @@ async def async_setup_entry(
                 rescheduling_delay=rescheduling_delay,
                 override_entity_id=override_entity,
                 presence_entity_id=presence_entity,
+                schedule=schedule,
             )
         )
 
@@ -84,6 +101,7 @@ class SchedyClimate(ClimateEntity):
         rescheduling_delay: int,
         override_entity_id: str | None = None,
         presence_entity_id: str | None = None,
+        schedule: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the climate entity."""
         self._hass = hass
@@ -92,6 +110,7 @@ class SchedyClimate(ClimateEntity):
         self._rescheduling_delay = timedelta(minutes=rescheduling_delay)
         self._override_entity_id = override_entity_id
         self._presence_entity_id = presence_entity_id
+        self._schedule = schedule or {}
         self._attr_name = f"{room_name} Heating"
         self._attr_unique_id = f"{DOMAIN}_{room_name}_climate"
 
@@ -319,16 +338,30 @@ class SchedyClimate(ClimateEntity):
         """Evaluate time-based schedule for Home mode."""
         now = datetime.now()
         hour = now.hour
+        minute = now.minute
+        current_time = f"{hour:02d}:{minute:02d}"
         is_weekend = now.weekday() >= 5
 
-        if is_weekend:
-            if 8 <= hour < 21:
-                return 21.0
-            return 19.0
+        # Get schedule config
+        use_weekend = self._schedule.get(CONF_USE_WEEKEND_SCHEDULE, False)
+
+        if is_weekend and use_weekend:
+            # Weekend schedule
+            day_temp = self._schedule.get(CONF_WEEKEND_DAY_TEMP, DEFAULT_DAY_TEMP)
+            night_temp = self._schedule.get(CONF_WEEKEND_NIGHT_TEMP, DEFAULT_NIGHT_TEMP)
+            day_start = self._schedule.get(CONF_WEEKEND_DAY_START, DEFAULT_DAY_START)
+            day_end = self._schedule.get(CONF_WEEKEND_DAY_END, DEFAULT_DAY_END)
         else:
-            if 15 <= hour < 21:
-                return 21.0
-            return 19.0
+            # Weekday schedule
+            day_temp = self._schedule.get(CONF_DAY_TEMP, DEFAULT_DAY_TEMP)
+            night_temp = self._schedule.get(CONF_NIGHT_TEMP, DEFAULT_NIGHT_TEMP)
+            day_start = self._schedule.get(CONF_DAY_START, DEFAULT_DAY_START)
+            day_end = self._schedule.get(CONF_DAY_END, DEFAULT_DAY_END)
+
+        # Check if current time is within day hours
+        if day_start <= current_time < day_end:
+            return day_temp
+        return night_temp
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature (manual override)."""
@@ -408,6 +441,7 @@ class SchedyClimate(ClimateEntity):
             "override_entity": self._override_entity_id,
             "presence_entity": self._presence_entity_id,
             "underlying_entities": self._climate_entity_ids,
+            "schedule": self._schedule,
         }
 
     async def async_turn_on(self) -> None:

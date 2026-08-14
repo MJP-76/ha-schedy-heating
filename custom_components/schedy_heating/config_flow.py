@@ -14,12 +14,28 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_CLIMATE_ENTITIES,
+    CONF_DAY_END,
+    CONF_DAY_START,
+    CONF_DAY_TEMP,
+    CONF_DEFAULT_TEMP,
+    CONF_NIGHT_TEMP,
     CONF_OVERRIDE_ENTITY,
     CONF_PRESENCE_ENTITY,
     CONF_RESCHEDULING_DELAY,
     CONF_ROOMS,
     CONF_ROOM_NAME,
+    CONF_SCHEDULE,
+    CONF_USE_WEEKEND_SCHEDULE,
+    CONF_WEEKEND_DAY_END,
+    CONF_WEEKEND_DAY_START,
+    CONF_WEEKEND_DAY_TEMP,
+    CONF_WEEKEND_NIGHT_TEMP,
+    DEFAULT_DAY_END,
+    DEFAULT_DAY_START,
+    DEFAULT_DAY_TEMP,
+    DEFAULT_NIGHT_TEMP,
     DEFAULT_RESCHEDULING_DELAY,
+    DEFAULT_TARGET_TEMP,
     DOMAIN,
 )
 
@@ -35,6 +51,7 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._rooms: list[dict[str, Any]] = []
         self._climate_entities: list[str] = []
+        self._current_room_idx: int = 0
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -74,7 +91,9 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         data_schema=self._room_schema(),
                         errors={"base": "no_rooms"},
                     )
-                return self._create_entry()
+                # Start schedule configuration for first room
+                self._current_room_idx = 0
+                return await self.async_step_schedule()
 
         return self.async_show_form(
             step_id="rooms",
@@ -122,6 +141,80 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional("add_another", default=False): bool,
                 vol.Optional("finish", default=True): bool,
+            }
+        )
+
+    async def async_step_schedule(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Step 3: Configure schedule for each room."""
+        if self._current_room_idx >= len(self._rooms):
+            return self._create_entry()
+
+        room = self._rooms[self._current_room_idx]
+        room_name = room["name"]
+
+        if user_input is not None:
+            # Store schedule config
+            schedule = {
+                CONF_DEFAULT_TEMP: user_input.get(CONF_DEFAULT_TEMP, DEFAULT_TARGET_TEMP),
+                CONF_DAY_TEMP: user_input.get(CONF_DAY_TEMP, DEFAULT_DAY_TEMP),
+                CONF_NIGHT_TEMP: user_input.get(CONF_NIGHT_TEMP, DEFAULT_NIGHT_TEMP),
+                CONF_DAY_START: user_input.get(CONF_DAY_START, DEFAULT_DAY_START),
+                CONF_DAY_END: user_input.get(CONF_DAY_END, DEFAULT_DAY_END),
+                CONF_USE_WEEKEND_SCHEDULE: user_input.get(CONF_USE_WEEKEND_SCHEDULE, False),
+            }
+
+            if schedule[CONF_USE_WEEKEND_SCHEDULE]:
+                schedule[CONF_WEEKEND_DAY_TEMP] = user_input.get(
+                    CONF_WEEKEND_DAY_TEMP, DEFAULT_DAY_TEMP
+                )
+                schedule[CONF_WEEKEND_NIGHT_TEMP] = user_input.get(
+                    CONF_WEEKEND_NIGHT_TEMP, DEFAULT_NIGHT_TEMP
+                )
+                schedule[CONF_WEEKEND_DAY_START] = user_input.get(
+                    CONF_WEEKEND_DAY_START, DEFAULT_DAY_START
+                )
+                schedule[CONF_WEEKEND_DAY_END] = user_input.get(
+                    CONF_WEEKEND_DAY_END, DEFAULT_DAY_END
+                )
+
+            self._rooms[self._current_room_idx][CONF_SCHEDULE] = schedule
+
+            # Move to next room
+            self._current_room_idx += 1
+            return await self.async_step_schedule()
+
+        return self.async_show_form(
+            step_id="schedule",
+            data_schema=self._schedule_schema(room_name),
+            description_placeholders={"room_name": room_name},
+        )
+
+    def _schedule_schema(self, room_name: str) -> vol.Schema:
+        """Return the schedule configuration schema."""
+        return vol.Schema(
+            {
+                vol.Optional(
+                    CONF_DEFAULT_TEMP, default=DEFAULT_TARGET_TEMP
+                ): vol.All(float, vol.Range(min=5.0, max=30.0)),
+                vol.Optional(
+                    CONF_DAY_TEMP, default=DEFAULT_DAY_TEMP
+                ): vol.All(float, vol.Range(min=5.0, max=30.0)),
+                vol.Optional(
+                    CONF_NIGHT_TEMP, default=DEFAULT_NIGHT_TEMP
+                ): vol.All(float, vol.Range(min=5.0, max=30.0)),
+                vol.Optional(CONF_DAY_START, default=DEFAULT_DAY_START): str,
+                vol.Optional(CONF_DAY_END, default=DEFAULT_DAY_END): str,
+                vol.Optional(CONF_USE_WEEKEND_SCHEDULE, default=False): bool,
+                vol.Optional(
+                    CONF_WEEKEND_DAY_TEMP, default=DEFAULT_DAY_TEMP
+                ): vol.All(float, vol.Range(min=5.0, max=30.0)),
+                vol.Optional(
+                    CONF_WEEKEND_NIGHT_TEMP, default=DEFAULT_NIGHT_TEMP
+                ): vol.All(float, vol.Range(min=5.0, max=30.0)),
+                vol.Optional(CONF_WEEKEND_DAY_START, default=DEFAULT_DAY_START): str,
+                vol.Optional(CONF_WEEKEND_DAY_END, default=DEFAULT_DAY_END): str,
             }
         )
 
