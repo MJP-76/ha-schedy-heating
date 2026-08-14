@@ -15,24 +15,15 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_CLIMATE_ENTITIES,
     CONF_OVERRIDE_ENTITY,
+    CONF_PRESENCE_ENTITY,
     CONF_RESCHEDULING_DELAY,
     CONF_ROOMS,
     CONF_ROOM_NAME,
     DEFAULT_RESCHEDULING_DELAY,
     DOMAIN,
-    HEATING_MODES,
-    SEASONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _get_climate_entities(hass: HomeAssistant) -> list[str]:
-    """Return list of climate entity IDs."""
-    return [
-        entity.entity_id
-        for entity in hass.states.async_all("climate")
-    ]
 
 
 class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -52,8 +43,6 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._climate_entities = user_input["climate_entities"]
             return await self.async_step_rooms()
-
-        climate_entities = _get_climate_entities(self.hass)
 
         return self.async_show_form(
             step_id="user",
@@ -75,15 +64,7 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Step 2: Configure rooms."""
         if user_input is not None:
             if user_input.get("add_another"):
-                self._rooms.append(
-                    {
-                        "name": user_input["room_name"],
-                        "climate_entities": user_input.get("room_climate_entities", []),
-                        "rescheduling_delay": user_input.get(
-                            "rescheduling_delay", DEFAULT_RESCHEDULING_DELAY
-                        ),
-                    }
-                )
+                self._rooms.append(self._build_room(user_input))
                 return await self.async_step_rooms()
 
             if user_input.get("finish"):
@@ -100,6 +81,21 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=self._room_schema(),
         )
 
+    def _build_room(self, user_input: dict[str, Any]) -> dict[str, Any]:
+        """Build a room config dict from user input."""
+        room: dict[str, Any] = {
+            "name": user_input["room_name"],
+            "climate_entities": user_input.get("room_climate_entities", []),
+            "rescheduling_delay": user_input.get(
+                "rescheduling_delay", DEFAULT_RESCHEDULING_DELAY
+            ),
+        }
+        if user_input.get("override_entity"):
+            room["override_entity"] = user_input["override_entity"]
+        if user_input.get("presence_entity"):
+            room["presence_entity"] = user_input["presence_entity"]
+        return room
+
     def _room_schema(self) -> vol.Schema:
         """Return the room configuration schema."""
         return vol.Schema(
@@ -114,6 +110,16 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     "rescheduling_delay", default=DEFAULT_RESCHEDULING_DELAY
                 ): vol.All(int, vol.Range(min=0, max=1440)),
+                vol.Optional("override_entity"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="input_boolean",
+                    )
+                ),
+                vol.Optional("presence_entity"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="person",
+                    )
+                ),
                 vol.Optional("add_another", default=False): bool,
                 vol.Optional("finish", default=True): bool,
             }

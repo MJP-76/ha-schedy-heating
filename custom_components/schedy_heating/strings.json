@@ -15,6 +15,8 @@
           "room_name": "Room Name",
           "room_climate_entities": "Climate Entities for this Room",
           "rescheduling_delay": "Rescheduling Delay (minutes)",
+          "override_entity": "Override Entity (optional)",
+          "presence_entity": "Presence Entity (optional, for independent tracking)",
           "add_another": "Add Another Room",
           "finish": "Finish Setup"
         }
