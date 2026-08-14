@@ -50,6 +50,7 @@ _LOGGER = logging.getLogger(__name__)
 SCHEDY_CONFIG_PATHS = [
     "/addon_configs/a0d7b954_appdaemon/apps/hassapps-heating.yaml",
     "/config/appdaemon/apps/hassapps-heating.yaml",
+    "/homeassistant/appdaemon/apps/hassapps-heating.yaml",
 ]
 
 
@@ -86,18 +87,40 @@ def _get_schedy_config(hass: HomeAssistant) -> dict[str, Any] | None:
     Returns:
         Dict with parsed Schedy config or None if not found.
     """
-    for path in SCHEDY_CONFIG_PATHS:
-        if os.path.exists(path):
-            try:
-                import yaml
+    import yaml
 
+    for path in SCHEDY_CONFIG_PATHS:
+        try:
+            if os.path.exists(path):
                 with open(path) as f:
                     config = yaml.safe_load(f)
 
                 if config and "tock_heating" in config:
+                    _LOGGER.info("Read Schedy config from %s", path)
                     return config["tock_heating"]
-            except Exception as e:
-                _LOGGER.warning("Failed to read Schedy config from %s: %s", path, e)
+        except Exception as e:
+            _LOGGER.warning("Failed to read Schedy config from %s: %s", path, e)
+
+    # Try to find config by searching common locations
+    search_paths = [
+        "/addon_configs",
+        "/config",
+        "/homeassistant",
+    ]
+
+    for base_path in search_paths:
+        try:
+            if os.path.exists(base_path):
+                for root, dirs, files in os.walk(base_path):
+                    if "hassapps-heating.yaml" in files:
+                        config_path = os.path.join(root, "hassapps-heating.yaml")
+                        _LOGGER.info("Found Schedy config at %s", config_path)
+                        with open(config_path) as f:
+                            config = yaml.safe_load(f)
+                        if config and "tock_heating" in config:
+                            return config["tock_heating"]
+        except Exception as e:
+            _LOGGER.warning("Error searching %s: %s", base_path, e)
 
     return None
 
