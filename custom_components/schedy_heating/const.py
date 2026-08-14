@@ -41,4 +41,4 @@ DEFAULT_RESCHEDULING_DELAY = 60
 DEFAULT_TARGET_TEMP = 18.0
 
 # Platforms
-PLATFORMS = ["select", "binary_sensor"]
+PLATFORMS = ["select", "binary_sensor", "climate"]
