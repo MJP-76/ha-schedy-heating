@@ -151,6 +151,24 @@ class OctopusEnergyCoordinator:
         """Return all detected entities."""
         return self._detected
 
+    def set_rate_sensor(self, entity_id: str) -> None:
+        """Override the rate sensor entity ID.
+
+        Args:
+            entity_id: Entity ID to use as the rate sensor
+        """
+        self._rate_sensor_id = entity_id
+        _LOGGER.info("Octopus Energy rate sensor set to: %s", entity_id)
+
+    def set_saving_sensor(self, entity_id: str) -> None:
+        """Override the saving session sensor entity ID.
+
+        Args:
+            entity_id: Entity ID to use as the saving session sensor
+        """
+        self._saving_sensor_id = entity_id
+        _LOGGER.info("Octopus Energy saving session sensor set to: %s", entity_id)
+
     def get_current_price_tier(self) -> str:
         """Get the current price tier based on Octopus Energy data.
 

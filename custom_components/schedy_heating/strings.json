@@ -8,6 +8,15 @@
           "climate_entities": "Climate Entities"
         }
       },
+      "octopus": {
+        "title": "Octopus Energy Integration",
+        "description": "Octopus Energy detected! Found {rate_sensor_count} rate sensor(s) and {saving_sensor_count} saving session sensor(s). Configure which entities to use for automatic price tier detection.",
+        "data": {
+          "octopus_enabled": "Enable Octopus Energy Integration",
+          "octopus_rate_sensor": "Electricity Rate Sensor",
+          "octopus_saving_sensor": "Saving Session Sensor"
+        }
+      },
       "rooms": {
         "title": "Configure Rooms",
         "description": "Add rooms and assign climate entities to each room.",

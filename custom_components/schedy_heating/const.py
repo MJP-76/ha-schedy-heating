@@ -30,6 +30,11 @@ CONF_WEEKEND_DAY_START = "weekend_day_start"
 CONF_WEEKEND_DAY_END = "weekend_day_end"
 CONF_USE_WEEKEND_SCHEDULE = "use_weekend_schedule"
 
+# Octopus Energy config keys
+CONF_OCTOPUS_ENABLED = "octopus_enabled"
+CONF_OCTOPUS_RATE_SENSOR = "octopus_rate_sensor"
+CONF_OCTOPUS_SAVING_SENSOR = "octopus_saving_sensor"
+
 # Entity domains
 DOMAIN_CLIMATE = "climate"
 DOMAIN_INPUT_BOOLEAN = "input_boolean"

@@ -20,6 +20,9 @@ from .const import (
     CONF_DEFAULT_TEMP,
     CONF_NIGHT_TEMP,
     CONF_OVERRIDE_ENTITY,
+    CONF_OCTOPUS_ENABLED,
+    CONF_OCTOPUS_RATE_SENSOR,
+    CONF_OCTOPUS_SAVING_SENSOR,
     CONF_PRESENCE_ENTITY,
     CONF_RESCHEDULING_DELAY,
     CONF_ROOMS,
@@ -38,6 +41,7 @@ from .const import (
     DEFAULT_TARGET_TEMP,
     DOMAIN,
 )
+from .octopus import detect_octopus_energy
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +56,10 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._rooms: list[dict[str, Any]] = []
         self._climate_entities: list[str] = []
         self._current_room_idx: int = 0
+        self._octopus_detected: dict[str, Any] = {}
+        self._octopus_enabled: bool = False
+        self._octopus_rate_sensor: str | None = None
+        self._octopus_saving_sensor: str | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -59,7 +67,7 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Step 1: Select climate entities to manage."""
         if user_input is not None:
             self._climate_entities = user_input["climate_entities"]
-            return await self.async_step_rooms()
+            return await self.async_step_octopus()
 
         return self.async_show_form(
             step_id="user",
@@ -75,10 +83,79 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         )
 
+    async def async_step_octopus(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Step 2: Configure Octopus Energy integration."""
+        # Detect Octopus Energy entities
+        self._octopus_detected = detect_octopus_energy(self.hass)
+
+        if not self._octopus_detected["has_octopus_energy"]:
+            # Skip this step if Octopus Energy is not detected
+            self._octopus_enabled = False
+            return await self.async_step_rooms()
+
+        if user_input is not None:
+            self._octopus_enabled = user_input.get(CONF_OCTOPUS_ENABLED, True)
+
+            if self._octopus_enabled:
+                self._octopus_rate_sensor = user_input.get(CONF_OCTOPUS_RATE_SENSOR)
+                self._octopus_saving_sensor = user_input.get(CONF_OCTOPUS_SAVING_SENSOR)
+            else:
+                self._octopus_rate_sensor = None
+                self._octopus_saving_sensor = None
+
+            return await self.async_step_rooms()
+
+        # Build schema with detected entities
+        rate_sensors = self._octopus_detected.get("rate_sensors", [])
+        saving_sensors = self._octopus_detected.get("saving_session_sensors", [])
+
+        schema_fields: dict[Any, Any] = {
+            vol.Optional(CONF_OCTOPUS_ENABLED, default=True): bool,
+        }
+
+        if rate_sensors:
+            schema_fields[
+                vol.Optional(
+                    CONF_OCTOPUS_RATE_SENSOR,
+                    default=rate_sensors[0] if rate_sensors else None,
+                )
+            ] = selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="monetary",
+                    multiple=False,
+                )
+            )
+
+        if saving_sensors:
+            schema_fields[
+                vol.Optional(
+                    CONF_OCTOPUS_SAVING_SENSOR,
+                    default=saving_sensors[0] if saving_sensors else None,
+                )
+            ] = selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="binary_sensor",
+                    device_class="plug",
+                    multiple=False,
+                )
+            )
+
+        return self.async_show_form(
+            step_id="octopus",
+            data_schema=vol.Schema(schema_fields),
+            description_placeholders={
+                "rate_sensor_count": str(len(rate_sensors)),
+                "saving_sensor_count": str(len(saving_sensors)),
+            },
+        )
+
     async def async_step_rooms(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 2: Configure rooms."""
+        """Step 3: Configure rooms."""
         if user_input is not None:
             if user_input.get("add_another"):
                 self._rooms.append(self._build_room(user_input))
@@ -147,7 +224,7 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_schedule(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 3: Configure schedule for each room."""
+        """Step 4: Configure schedule for each room."""
         if self._current_room_idx >= len(self._rooms):
             return self._create_entry()
 
@@ -220,10 +297,22 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def _create_entry(self) -> FlowResult:
         """Create the config entry."""
+        data: dict[str, Any] = {
+            "climate_entities": self._climate_entities,
+            CONF_ROOMS: self._rooms,
+        }
+
+        # Add Octopus Energy config if enabled
+        if self._octopus_enabled:
+            data[CONF_OCTOPUS_ENABLED] = True
+            if self._octopus_rate_sensor:
+                data[CONF_OCTOPUS_RATE_SENSOR] = self._octopus_rate_sensor
+            if self._octopus_saving_sensor:
+                data[CONF_OCTOPUS_SAVING_SENSOR] = self._octopus_saving_sensor
+        else:
+            data[CONF_OCTOPUS_ENABLED] = False
+
         return self.async_create_entry(
             title="Schedy Heating",
-            data={
-                "climate_entities": self._climate_entities,
-                CONF_ROOMS: self._rooms,
-            },
+            data=data,
         )
