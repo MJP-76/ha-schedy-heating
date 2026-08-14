@@ -1,0 +1,27 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select Climate Entities",
+        "description": "Choose which climate entities (thermostats) to manage with Schedy Heating.",
+        "data": {
+          "climate_entities": "Climate Entities"
+        }
+      },
+      "rooms": {
+        "title": "Configure Rooms",
+        "description": "Add rooms and assign climate entities to each room. Each room gets its own heating schedule.",
+        "data": {
+          "room_name": "Room Name",
+          "room_climate_entities": "Climate Entities for this Room",
+          "rescheduling_delay": "Rescheduling Delay (minutes)",
+          "add_another": "Add Another Room",
+          "finish": "Finish Setup"
+        }
+      }
+    },
+    "error": {
+      "no_rooms": "Please add at least one room."
+    }
+  }
+}

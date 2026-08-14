@@ -1,0 +1,13 @@
+{
+  "domain": "schedy_heating",
+  "name": "Schedy Heating",
+  "codeowners": ["@MJP-76"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/MJP-76/ha-schedy-heating",
+  "integration_type": "hub",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/MJP-76/ha-schedy-heating/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
