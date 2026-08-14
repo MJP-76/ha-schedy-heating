@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 import voluptuous as vol
@@ -45,6 +46,74 @@ from .octopus import detect_octopus_energy
 
 _LOGGER = logging.getLogger(__name__)
 
+# Paths where Schedy AppDaemon config might be found
+SCHEDY_CONFIG_PATHS = [
+    "/addon_configs/a0d7b954_appdaemon/apps/hassapps-heating.yaml",
+    "/config/appdaemon/apps/hassapps-heating.yaml",
+]
+
+
+def _detect_schedy_installed(hass: HomeAssistant) -> bool:
+    """Detect if Schedy AppDaemon app is installed and configured.
+
+    Checks for:
+    1. hassapps-heating.yaml config file
+    2. Schedy-managed climate entities
+    """
+    # Check for config file
+    for path in SCHEDY_CONFIG_PATHS:
+        if os.path.exists(path):
+            _LOGGER.info("Found Schedy config at %s", path)
+            return True
+
+    # Check for Schedy-managed entities (heating_mode, heating_season, etc.)
+    schedy_entities = [
+        "input_select.heating_mode",
+        "input_select.heating_season",
+        "binary_sensor.heating_door_status",
+    ]
+    for entity_id in schedy_entities:
+        if hass.states.get(entity_id) is not None:
+            _LOGGER.info("Found Schedy entity: %s", entity_id)
+            return True
+
+    return False
+
+
+def _get_schedy_config(hass: HomeAssistant) -> dict[str, Any] | None:
+    """Read existing Schedy configuration if available.
+
+    Returns:
+        Dict with parsed Schedy config or None if not found.
+    """
+    for path in SCHEDY_CONFIG_PATHS:
+        if os.path.exists(path):
+            try:
+                import yaml
+
+                with open(path) as f:
+                    config = yaml.safe_load(f)
+
+                if config and "tock_heating" in config:
+                    return config["tock_heating"]
+            except Exception as e:
+                _LOGGER.warning("Failed to read Schedy config from %s: %s", path, e)
+
+    return None
+
+
+def _get_all_climate_entities(hass: HomeAssistant) -> list[dict[str, str]]:
+    """Get all climate entities formatted for selector."""
+    entities = []
+    for state in hass.states.async_all("climate"):
+        entities.append(
+            {
+                "value": state.entity_id,
+                "label": state.attributes.get("friendly_name", state.entity_id),
+            }
+        )
+    return entities
+
 
 class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Schedy Heating."""
@@ -60,38 +129,69 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._octopus_enabled: bool = False
         self._octopus_rate_sensor: str | None = None
         self._octopus_saving_sensor: str | None = None
+        self._schedy_config: dict[str, Any] | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Step 1: Select climate entities to manage."""
+        """Step 1: Check prerequisites and select climate entities."""
+        # Check if Schedy is installed
+        schedy_installed = _detect_schedy_installed(self.hass)
+
+        if not schedy_installed:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=vol.Schema({}),
+                errors={"base": "schedy_not_found"},
+                description_placeholders={
+                    "error": "Schedy AppDaemon app not found. Please install and configure Schedy first."
+                },
+            )
+
+        # Try to read existing Schedy config
+        self._schedy_config = _get_schedy_config(self.hass)
+
         if user_input is not None:
-            self._climate_entities = user_input["climate_entities"]
+            self._climate_entities = user_input[CONF_CLIMATE_ENTITIES]
             return await self.async_step_octopus()
+
+        # Get all available climate entities
+        climate_entities = _get_all_climate_entities(self.hass)
+
+        if not climate_entities:
+            return self.async_show_form(
+                step_id="user",
+                data_schema=vol.Schema({}),
+                errors={"base": "no_climate_entities"},
+            )
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required("climate_entities"): selector.EntitySelector(
-                        selector.EntitySelectorConfig(
-                            domain="climate",
+                    vol.Required(CONF_CLIMATE_ENTITIES): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=climate_entities,
                             multiple=True,
+                            mode=selector.SelectSelectorMode.LIST,
                         )
                     ),
                 }
             ),
+            description_placeholders={
+                "schedy_config": "Schedy config detected"
+                if self._schedy_config
+                else "No existing config found"
+            },
         )
 
     async def async_step_octopus(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Step 2: Configure Octopus Energy integration."""
-        # Detect Octopus Energy entities
         self._octopus_detected = detect_octopus_energy(self.hass)
 
         if not self._octopus_detected["has_octopus_energy"]:
-            # Skip this step if Octopus Energy is not detected
             self._octopus_enabled = False
             return await self.async_step_rooms()
 
@@ -107,7 +207,6 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             return await self.async_step_rooms()
 
-        # Build schema with detected entities
         rate_sensors = self._octopus_detected.get("rate_sensors", [])
         saving_sensors = self._octopus_detected.get("saving_session_sensors", [])
 
@@ -116,30 +215,36 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
 
         if rate_sensors:
+            rate_options = [
+                {"value": s, "label": s.split(".")[-1].replace("_", " ").title()}
+                for s in rate_sensors
+            ]
             schema_fields[
                 vol.Optional(
                     CONF_OCTOPUS_RATE_SENSOR,
-                    default=rate_sensors[0] if rate_sensors else None,
+                    default=rate_sensors[0],
                 )
-            ] = selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="sensor",
-                    device_class="monetary",
-                    multiple=False,
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=rate_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             )
 
         if saving_sensors:
+            saving_options = [
+                {"value": s, "label": s.split(".")[-1].replace("_", " ").title()}
+                for s in saving_sensors
+            ]
             schema_fields[
                 vol.Optional(
                     CONF_OCTOPUS_SAVING_SENSOR,
-                    default=saving_sensors[0] if saving_sensors else None,
+                    default=saving_sensors[0],
                 )
-            ] = selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="binary_sensor",
-                    device_class="plug",
-                    multiple=False,
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=saving_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             )
 
@@ -168,7 +273,6 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         data_schema=self._room_schema(),
                         errors={"base": "no_rooms"},
                     )
-                # Start schedule configuration for first room
                 self._current_room_idx = 0
                 return await self.async_step_schedule()
 
@@ -194,32 +298,68 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def _room_schema(self) -> vol.Schema:
         """Return the room configuration schema."""
-        return vol.Schema(
+        climate_entities = _get_all_climate_entities(self.hass)
+        climate_options = [
+            {"value": e["value"], "label": e["label"]} for e in climate_entities
+        ]
+
+        # Get all input_boolean entities for overrides
+        override_options = [
             {
-                vol.Optional("room_name"): str,
-                vol.Optional("room_climate_entities"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain="climate",
-                        multiple=True,
-                    )
-                ),
-                vol.Optional(
-                    "rescheduling_delay", default=DEFAULT_RESCHEDULING_DELAY
-                ): vol.All(int, vol.Range(min=0, max=1440)),
-                vol.Optional("override_entity"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain="input_boolean",
-                    )
-                ),
-                vol.Optional("presence_entity"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain="person",
-                    )
-                ),
-                vol.Optional("add_another", default=False): bool,
-                vol.Optional("finish", default=True): bool,
+                "value": state.entity_id,
+                "label": state.attributes.get("friendly_name", state.entity_id),
             }
-        )
+            for state in self.hass.states.async_all("input_boolean")
+            if "hvac" in state.entity_id.lower() or "override" in state.entity_id.lower()
+        ]
+
+        # Get all person entities for presence
+        presence_options = [
+            {
+                "value": state.entity_id,
+                "label": state.attributes.get("friendly_name", state.entity_id),
+            }
+            for state in self.hass.states.async_all("person")
+        ]
+
+        schema_fields: dict[Any, Any] = {
+            vol.Optional("room_name"): str,
+            vol.Optional("room_climate_entities", default=[]): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=climate_options,
+                    multiple=True,
+                    mode=selector.SelectSelectorMode.LIST,
+                )
+            ),
+            vol.Optional(
+                "rescheduling_delay", default=DEFAULT_RESCHEDULING_DELAY
+            ): vol.All(int, vol.Range(min=0, max=1440)),
+        }
+
+        if override_options:
+            schema_fields[
+                vol.Optional("override_entity")
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=override_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+
+        if presence_options:
+            schema_fields[
+                vol.Optional("presence_entity")
+            ] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=presence_options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            )
+
+        schema_fields[vol.Optional("add_another", default=False)] = bool
+        schema_fields[vol.Optional("finish", default=True)] = bool
+
+        return vol.Schema(schema_fields)
 
     async def async_step_schedule(
         self, user_input: dict[str, Any] | None = None
@@ -232,7 +372,6 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         room_name = room["name"]
 
         if user_input is not None:
-            # Store schedule config
             schedule = {
                 CONF_DEFAULT_TEMP: user_input.get(CONF_DEFAULT_TEMP, DEFAULT_TARGET_TEMP),
                 CONF_DAY_TEMP: user_input.get(CONF_DAY_TEMP, DEFAULT_DAY_TEMP),
@@ -258,7 +397,6 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             self._rooms[self._current_room_idx][CONF_SCHEDULE] = schedule
 
-            # Move to next room
             self._current_room_idx += 1
             return await self.async_step_schedule()
 
@@ -302,7 +440,6 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_ROOMS: self._rooms,
         }
 
-        # Add Octopus Energy config if enabled
         if self._octopus_enabled:
             data[CONF_OCTOPUS_ENABLED] = True
             if self._octopus_rate_sensor:
@@ -313,6 +450,6 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data[CONF_OCTOPUS_ENABLED] = False
 
         return self.async_create_entry(
-            title="Schedy Heating",
+            title="Schedy Heating UI",
             data=data,
         )

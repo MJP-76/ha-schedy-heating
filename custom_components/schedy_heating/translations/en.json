@@ -3,14 +3,14 @@
     "step": {
       "user": {
         "title": "Select Climate Entities",
-        "description": "Choose which climate entities (thermostats) to manage with Schedy Heating.",
+        "description": "Schedy AppDaemon app detected. {schedy_config}\n\nSelect which climate entities (thermostats) to manage with Schedy Heating UI.",
         "data": {
-          "climate_entities": "Climate Entities"
+          "climate_entities": "Climate Entities (select multiple)"
         }
       },
       "octopus": {
         "title": "Octopus Energy Integration",
-        "description": "Octopus Energy detected! Found {rate_sensor_count} rate sensor(s) and {saving_sensor_count} saving session sensor(s). Configure which entities to use for automatic price tier detection.",
+        "description": "Octopus Energy detected! Found {rate_sensor_count} rate sensor(s) and {saving_sensor_count} saving session sensor(s).",
         "data": {
           "octopus_enabled": "Enable Octopus Energy Integration",
           "octopus_rate_sensor": "Electricity Rate Sensor",
@@ -22,7 +22,7 @@
         "description": "Add rooms and assign climate entities to each room.",
         "data": {
           "room_name": "Room Name",
-          "room_climate_entities": "Climate Entities for this Room",
+          "room_climate_entities": "Climate Entities (select multiple)",
           "rescheduling_delay": "Rescheduling Delay (minutes)",
           "override_entity": "Override Entity (optional)",
           "presence_entity": "Presence Entity (optional)",
@@ -32,7 +32,7 @@
       },
       "schedule": {
         "title": "Configure Schedule: {room_name}",
-        "description": "Set the time-based heating schedule for {room_name}. Day/night temperatures are used during Home mode.",
+        "description": "Set the time-based heating schedule for {room_name}.",
         "data": {
           "default_temp": "Default Temperature (°C)",
           "day_temp": "Day Temperature (°C)",
@@ -48,6 +48,8 @@
       }
     },
     "error": {
+      "schedy_not_found": "Schedy AppDaemon app not found. Please install and configure Schedy first.",
+      "no_climate_entities": "No climate entities found. Please add climate entities to Home Assistant first.",
       "no_rooms": "Please add at least one room."
     }
   }
