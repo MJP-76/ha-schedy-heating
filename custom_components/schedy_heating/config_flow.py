@@ -102,6 +102,53 @@ def _get_schedy_config(hass: HomeAssistant) -> dict[str, Any] | None:
     return None
 
 
+def _get_schedy_climate_entities(schedy_config: dict[str, Any]) -> list[str]:
+    """Extract climate entity IDs from Schedy config.
+
+    Returns:
+        List of climate entity IDs found in the Schedy rooms config.
+    """
+    entities = []
+    rooms = schedy_config.get("rooms", {})
+
+    for room_name, room_config in rooms.items():
+        actors = room_config.get("actors", {})
+        for entity_id in actors:
+            if entity_id.startswith("climate."):
+                entities.append(entity_id)
+
+    return entities
+
+
+def _get_schedy_rooms(schedy_config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract room configurations from Schedy config.
+
+    Returns:
+        List of room dicts with name and climate entities.
+    """
+    rooms = []
+    schedy_rooms = schedy_config.get("rooms", {})
+
+    for room_name, room_config in schedy_rooms.items():
+        actors = room_config.get("actors", {})
+        climate_entities = [
+            eid for eid in actors if eid.startswith("climate.")
+        ]
+
+        if climate_entities:
+            rooms.append(
+                {
+                    "name": room_name.replace("_", " ").title(),
+                    "climate_entities": climate_entities,
+                    "rescheduling_delay": room_config.get(
+                        "rescheduling_delay", 60
+                    ),
+                }
+            )
+
+    return rooms
+
+
 def _get_all_climate_entities(hass: HomeAssistant) -> list[dict[str, str]]:
     """Get all climate entities formatted for selector."""
     entities = []
@@ -165,11 +212,24 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors={"base": "no_climate_entities"},
             )
 
+        # Pre-select entities from Schedy config if available
+        default_entities = []
+        if self._schedy_config:
+            default_entities = _get_schedy_climate_entities(self._schedy_config)
+            _LOGGER.info(
+                "Pre-selecting %d entities from Schedy config: %s",
+                len(default_entities),
+                default_entities,
+            )
+
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_CLIMATE_ENTITIES): selector.SelectSelector(
+                    vol.Required(
+                        CONF_CLIMATE_ENTITIES,
+                        default=default_entities,
+                    ): selector.SelectSelector(
                         selector.SelectSelectorConfig(
                             options=climate_entities,
                             multiple=True,
@@ -179,8 +239,8 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             description_placeholders={
-                "schedy_config": "Schedy config detected"
-                if self._schedy_config
+                "schedy_config": f"Found {len(default_entities)} entities in Schedy config"
+                if default_entities
                 else "No existing config found"
             },
         )
@@ -261,6 +321,24 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Step 3: Configure rooms."""
+        # Pre-populate rooms from Schedy config if available
+        if not self._rooms and self._schedy_config:
+            schedy_rooms = _get_schedy_rooms(self._schedy_config)
+            # Only include rooms that have climate entities we selected
+            for room in schedy_rooms:
+                selected_entities = [
+                    e for e in room["climate_entities"]
+                    if e in self._climate_entities
+                ]
+                if selected_entities:
+                    room["climate_entities"] = selected_entities
+                    self._rooms.append(room)
+                    _LOGGER.info(
+                        "Imported room '%s' with entities: %s",
+                        room["name"],
+                        selected_entities,
+                    )
+
         if user_input is not None:
             if user_input.get("add_another"):
                 self._rooms.append(self._build_room(user_input))
