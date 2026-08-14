@@ -172,6 +172,35 @@ def _get_schedy_rooms(schedy_config: dict[str, Any]) -> list[dict[str, Any]]:
     return rooms
 
 
+def _read_schedy_config_from_path(config_path: str) -> dict[str, Any] | None:
+    """Read Schedy config from a user-provided path.
+
+    Args:
+        config_path: Path to the hassapps-heating.yaml file
+
+    Returns:
+        Dict with parsed Schedy config or None if not found.
+    """
+    import yaml
+
+    try:
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+
+            if config and "tock_heating" in config:
+                _LOGGER.info("Read Schedy config from user-provided path: %s", config_path)
+                return config["tock_heating"]
+            else:
+                _LOGGER.warning("Config file found but no 'tock_heating' key: %s", config_path)
+        else:
+            _LOGGER.warning("Config file not found at: %s", config_path)
+    except Exception as e:
+        _LOGGER.warning("Failed to read Schedy config from %s: %s", config_path, e)
+
+    return None
+
+
 def _get_all_climate_entities(hass: HomeAssistant) -> list[dict[str, str]]:
     """Get all climate entities formatted for selector."""
     entities = []
@@ -220,6 +249,48 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Try to read existing Schedy config
         self._schedy_config = _get_schedy_config(self.hass)
+
+        # If config not found, ask user for path
+        if not self._schedy_config:
+            if user_input is not None:
+                config_path = user_input.get("config_path")
+                if config_path:
+                    self._schedy_config = _read_schedy_config_from_path(config_path)
+
+                if not self._schedy_config:
+                    # Continue without pre-selection
+                    self._climate_entities = user_input.get(CONF_CLIMATE_ENTITIES, [])
+                    if self._climate_entities:
+                        return await self.async_step_octopus()
+
+            # Get all available climate entities
+            climate_entities = _get_all_climate_entities(self.hass)
+
+            if not climate_entities:
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=vol.Schema({}),
+                    errors={"base": "no_climate_entities"},
+                )
+
+            return self.async_show_form(
+                step_id="user",
+                data_schema=vol.Schema(
+                    {
+                        vol.Optional("config_path"): str,
+                        vol.Required(CONF_CLIMATE_ENTITIES, default=[]): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=climate_entities,
+                                multiple=True,
+                                mode=selector.SelectSelectorMode.LIST,
+                            )
+                        ),
+                    }
+                ),
+                description_placeholders={
+                    "schedy_config": "Could not read Schedy config automatically. Please provide the path to hassapps-heating.yaml or select entities manually."
+                },
+            )
 
         if user_input is not None:
             self._climate_entities = user_input[CONF_CLIMATE_ENTITIES]
