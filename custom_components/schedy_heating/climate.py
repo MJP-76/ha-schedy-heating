@@ -43,6 +43,7 @@ from .const import (
     DEFAULT_TARGET_TEMP,
     DOMAIN,
 )
+from .octopus import OctopusEnergyCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +56,10 @@ async def async_setup_entry(
     """Set up climate entities for Schedy Heating."""
     rooms = entry.data.get(CONF_ROOMS, [])
     entities = []
+
+    # Get Octopus Energy coordinator from hass data
+    entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+    octopus_coordinator = entry_data.get("octopus_coordinator")
 
     for room in rooms:
         room_name = room[CONF_ROOM_NAME]
@@ -75,6 +80,7 @@ async def async_setup_entry(
                 override_entity_id=override_entity,
                 presence_entity_id=presence_entity,
                 schedule=schedule,
+                octopus_coordinator=octopus_coordinator,
             )
         )
 
@@ -102,6 +108,7 @@ class SchedyClimate(ClimateEntity):
         override_entity_id: str | None = None,
         presence_entity_id: str | None = None,
         schedule: dict[str, Any] | None = None,
+        octopus_coordinator: OctopusEnergyCoordinator | None = None,
     ) -> None:
         """Initialize the climate entity."""
         self._hass = hass
@@ -111,6 +118,7 @@ class SchedyClimate(ClimateEntity):
         self._override_entity_id = override_entity_id
         self._presence_entity_id = presence_entity_id
         self._schedule = schedule or {}
+        self._octopus_coordinator = octopus_coordinator
         self._attr_name = f"{room_name} Heating"
         self._attr_unique_id = f"{DOMAIN}_{room_name}_climate"
 
@@ -137,7 +145,6 @@ class SchedyClimate(ClimateEntity):
         entities_to_watch = [
             "input_select.heating_mode",
             "input_select.heating_season",
-            "input_select.octopus_price",
             "input_boolean.heating_bedtime",
             "input_boolean.heating_guests",
             "input_boolean.power_saving",
@@ -147,15 +154,24 @@ class SchedyClimate(ClimateEntity):
             "person.berrit",
         ]
 
+        # Watch Octopus Energy entities if coordinator is available
+        if self._octopus_coordinator and self._octopus_coordinator.has_octopus_energy:
+            if self._octopus_coordinator.rate_sensor_id:
+                entities_to_watch.append(self._octopus_coordinator.rate_sensor_id)
+            if self._octopus_coordinator.saving_sensor_id:
+                entities_to_watch.append(self._octopus_coordinator.saving_sensor_id)
+        else:
+            # Fall back to manual input_select
+            entities_to_watch.append("input_select.octopus_price")
+
         # Add room-specific override entity
         if self._override_entity_id:
             entities_to_watch.append(self._override_entity_id)
-            # Initialize override state
             state = self._hass.states.get(self._override_entity_id)
             if state:
                 self._override_state = state.state
 
-        # Add room-specific presence entity (for bedroom4/berrit)
+        # Add room-specific presence entity
         if self._presence_entity_id:
             entities_to_watch.append(self._presence_entity_id)
 
@@ -181,7 +197,6 @@ class SchedyClimate(ClimateEntity):
         state_map = {
             "input_select.heating_mode": "_heating_mode",
             "input_select.heating_season": "_heating_season",
-            "input_select.octopus_price": "_octopus_price",
             "input_boolean.heating_bedtime": "_heating_bedtime",
             "input_boolean.heating_guests": "_heating_guests",
             "input_boolean.power_saving": "_power_saving",
@@ -192,6 +207,9 @@ class SchedyClimate(ClimateEntity):
             if state:
                 setattr(self, attr, state.state)
 
+        # Initialize Octopus price
+        self._async_update_octopus_price()
+
         # Initialize presence
         self._async_update_presence_sync()
 
@@ -200,6 +218,16 @@ class SchedyClimate(ClimateEntity):
             state = self._hass.states.get(self._presence_entity_id)
             if state:
                 self._bsp_location = state.state
+
+    @callback
+    def _async_update_octopus_price(self) -> None:
+        """Update Octopus price tier from coordinator or manual select."""
+        if self._octopus_coordinator and self._octopus_coordinator.has_octopus_energy:
+            self._octopus_price = self._octopus_coordinator.get_current_price_tier()
+        else:
+            state = self._hass.states.get("input_select.octopus_price")
+            if state:
+                self._octopus_price = state.state
 
     @callback
     def _async_update_presence_sync(self) -> None:
@@ -227,8 +255,6 @@ class SchedyClimate(ClimateEntity):
             self._heating_mode = new_state.state
         elif entity_id == "input_select.heating_season":
             self._heating_season = new_state.state
-        elif entity_id == "input_select.octopus_price":
-            self._octopus_price = new_state.state
         elif entity_id == "input_boolean.heating_bedtime":
             self._heating_bedtime = new_state.state
         elif entity_id == "input_boolean.heating_guests":
@@ -243,6 +269,13 @@ class SchedyClimate(ClimateEntity):
             self._bsp_location = new_state.state
         elif entity_id.startswith("person."):
             self._async_update_presence_sync()
+        elif entity_id == "input_select.octopus_price":
+            self._octopus_price = new_state.state
+        elif self._octopus_coordinator and entity_id in (
+            self._octopus_coordinator.rate_sensor_id,
+            self._octopus_coordinator.saving_sensor_id,
+        ):
+            self._async_update_octopus_price()
 
         # Re-evaluate the schedule
         await self._async_evaluate_schedule()
@@ -270,6 +303,11 @@ class SchedyClimate(ClimateEntity):
 
     def _evaluate_rules(self) -> float:
         """Evaluate schedule rules and return the target temperature."""
+        # Check for saving session (if Octopus Energy is available)
+        if self._octopus_coordinator and self._octopus_coordinator.has_octopus_energy:
+            if self._octopus_coordinator.is_saving_session_active():
+                return 17.0
+
         # Rule 1: Plunge pricing
         if self._octopus_price == "Plunge":
             return 21.0
@@ -279,8 +317,6 @@ class SchedyClimate(ClimateEntity):
             return 20.0
 
         # Rule 3: Presence check
-        # If room has specific presence entity (e.g., bedroom4/berrit), use it
-        # Otherwise use mandj_location (matthew + jenny)
         if self._presence_entity_id:
             if self._bsp_location == "not_home":
                 return 18.0
@@ -426,7 +462,7 @@ class SchedyClimate(ClimateEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional state attributes."""
-        return {
+        attrs = {
             "scheduled_temperature": self._scheduled_temp,
             "manual_override": self._manual_override,
             "manual_override_until": self._manual_override_until.isoformat()
@@ -443,6 +479,20 @@ class SchedyClimate(ClimateEntity):
             "underlying_entities": self._climate_entity_ids,
             "schedule": self._schedule,
         }
+
+        # Add Octopus Energy info if available
+        if self._octopus_coordinator and self._octopus_coordinator.has_octopus_energy:
+            attrs["octopus_energy_detected"] = True
+            attrs["octopus_rate_sensor"] = self._octopus_coordinator.rate_sensor_id
+            attrs["octopus_saving_sensor"] = self._octopus_coordinator.saving_sensor_id
+            attrs["octopus_current_rate"] = self._octopus_coordinator.get_current_rate()
+            attrs["octopus_saving_session_active"] = (
+                self._octopus_coordinator.is_saving_session_active()
+            )
+        else:
+            attrs["octopus_energy_detected"] = False
+
+        return attrs
 
     async def async_turn_on(self) -> None:
         """Turn the entity on."""
