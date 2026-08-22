@@ -279,15 +279,47 @@ class SchedyHeatingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # If config not found, ask user to paste it
         if not self._schedy_config:
             if user_input is not None:
-                # Check if user pasted config
-                config_yaml = user_input.get("config_yaml")
-                if config_yaml:
-                    self._schedy_config = _parse_schedy_config_yaml(config_yaml)
+                # Check if user pasted config or provided path
+                config_input = user_input.get("config_yaml", "")
+
+                if config_input:
+                    # Check if it's a file path or YAML content
+                    if config_input.strip().startswith("/") or config_input.strip().endswith(".yaml"):
+                        # It's a file path
+                        self._schedy_config = _read_schedy_config_from_path(config_input.strip())
+                    else:
+                        # It's YAML content
+                        self._schedy_config = _parse_schedy_config_yaml(config_input)
 
                 # Get selected entities
                 self._climate_entities = user_input.get(CONF_CLIMATE_ENTITIES, [])
                 if self._climate_entities:
                     return await self.async_step_octopus()
+
+                # If config was found, re-show form with pre-selected entities
+                if self._schedy_config:
+                    default_entities = _get_schedy_climate_entities(self._schedy_config)
+                    climate_entities = _get_all_climate_entities(self.hass)
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=vol.Schema(
+                            {
+                                vol.Required(
+                                    CONF_CLIMATE_ENTITIES,
+                                    default=default_entities,
+                                ): selector.SelectSelector(
+                                    selector.SelectSelectorConfig(
+                                        options=climate_entities,
+                                        multiple=True,
+                                        mode=selector.SelectSelectorMode.LIST,
+                                    )
+                                ),
+                            }
+                        ),
+                        description_placeholders={
+                            "schedy_config": f"Found {len(default_entities)} entities in Schedy config"
+                        },
+                    )
 
             # Get all available climate entities
             climate_entities = _get_all_climate_entities(self.hass)
