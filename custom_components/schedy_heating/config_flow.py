@@ -51,6 +51,7 @@ SCHEDY_CONFIG_PATHS = [
     "/addon_configs/a0d7b954_appdaemon/apps/hassapps-heating.yaml",
     "/config/appdaemon/apps/hassapps-heating.yaml",
     "/homeassistant/appdaemon/apps/hassapps-heating.yaml",
+    "/config/hassapps-heating.yaml",
 ]
 
 

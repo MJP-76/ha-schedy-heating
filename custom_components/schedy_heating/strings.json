@@ -3,9 +3,10 @@
     "step": {
       "user": {
         "title": "Select Climate Entities",
-        "description": "Schedy AppDaemon app detected. {schedy_config}\n\nSelect which climate entities (thermostats) to manage with Schedy Heating UI.",
+        "description": "Schedy AppDaemon app detected. {schedy_config}\n\nIf config not found, copy hassapps-heating.yaml to /config/ and try again.",
         "data": {
-          "climate_entities": "Climate Entities (select multiple)"
+          "climate_entities": "Climate Entities (select multiple)",
+          "config_path": "Schedy Config Path (optional)"
         }
       },
       "octopus": {
